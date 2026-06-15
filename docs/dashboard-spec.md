@@ -1,5 +1,7 @@
 # Dashboard Spec
 
+Implementation artifact: `docs/dashboard.html`
+
 Required Layer-2 panels:
 1. Latency P50/P95/P99
 2. Traffic (request count or QPS)

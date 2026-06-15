@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from structlog.contextvars import bind_contextvars
 
 from .agent import LabAgent
@@ -13,10 +14,12 @@ from .metrics import record_error, snapshot
 from .middleware import CorrelationIdMiddleware
 from .pii import hash_user_id, summarize_text
 from .schemas import ChatRequest, ChatResponse
-from .tracing import tracing_enabled
+from .tracing import langfuse_context, tracing_backend, tracing_enabled
 
 configure_logging()
 log = get_logger()
+ROOT_DIR = Path(__file__).resolve().parent.parent
+DASHBOARD_PATH = ROOT_DIR / "docs" / "dashboard.html"
 app = FastAPI(title="Day 13 Observability Lab")
 app.add_middleware(CorrelationIdMiddleware)
 agent = LabAgent()
@@ -34,7 +37,12 @@ async def startup() -> None:
 
 @app.get("/health")
 async def health() -> dict:
-    return {"ok": True, "tracing_enabled": tracing_enabled(), "incidents": status()}
+    return {
+        "ok": True,
+        "tracing_enabled": tracing_enabled(),
+        "tracing_backend": tracing_backend(),
+        "incidents": status(),
+    }
 
 
 @app.get("/metrics")
@@ -42,10 +50,20 @@ async def metrics() -> dict:
     return snapshot()
 
 
+@app.get("/dashboard", response_class=FileResponse)
+async def dashboard() -> FileResponse:
+    return FileResponse(DASHBOARD_PATH)
+
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: Request, body: ChatRequest) -> ChatResponse:
-    # TODO: Enrich logs with request context (user_id_hash, session_id, feature, model, env)
-    # bind_contextvars(...)
+    bind_contextvars(
+        user_id_hash=hash_user_id(body.user_id),
+        session_id=body.session_id,
+        feature=body.feature,
+        model=agent.model,
+        env=os.getenv("APP_ENV", "dev"),
+    )
     
     log.info(
         "request_received",
@@ -59,6 +77,7 @@ async def chat(request: Request, body: ChatRequest) -> ChatResponse:
             session_id=body.session_id,
             message=body.message,
         )
+        langfuse_context.flush()
         log.info(
             "response_sent",
             service="api",

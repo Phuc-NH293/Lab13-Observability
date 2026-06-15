@@ -12,7 +12,7 @@ A small FastAPI "agent" instrumented with:
 - minimal metrics aggregation
 - SLOs, alerts, and a blueprint report
 
-This template is intentionally incomplete. Teams are expected to finish TODOs during the lab.
+This implementation completes the lab gaps for request correlation, enriched structured logs, PII scrubbing, tracing hooks, metrics, SLOs, and alert runbooks.
 
 ## Suggested lab flow (Gapped Template)
 
@@ -108,6 +108,6 @@ Your final grade is calculated as follows:
    - **Git Evidence (20 pts)**: Traceable work via commits and code ownership.
 
 **Passing Criteria**: 
-- All `TODO` blocks must be completed.
+- All implementation gaps must be completed.
 - Minimum of 10 traces must be visible in Langfuse.
 - Dashboard must show all 6 required panels.

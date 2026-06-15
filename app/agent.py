@@ -25,12 +25,20 @@ class LabAgent:
         self.model = model
         self.llm = FakeLLM(model=model)
 
-    @observe()
+    @observe(name="agent_run", capture_input=False, capture_output=False)
     def run(self, user_id: str, feature: str, session_id: str, message: str) -> AgentResult:
         started = time.perf_counter()
-        docs = retrieve(message)
+        with langfuse_context.start_as_current_span(
+            name="rag_retrieve",
+            metadata={"query_preview": summarize_text(message), "feature": feature},
+        ):
+            docs = retrieve(message)
         prompt = f"Feature={feature}\nDocs={docs}\nQuestion={message}"
-        response = self.llm.generate(prompt)
+        with langfuse_context.start_as_current_span(
+            name="llm_generate",
+            metadata={"model": self.model, "prompt_preview": summarize_text(prompt)},
+        ):
+            response = self.llm.generate(prompt)
         quality_score = self._heuristic_quality(message, response.text, docs)
         latency_ms = int((time.perf_counter() - started) * 1000)
         cost_usd = self._estimate_cost(response.usage.input_tokens, response.usage.output_tokens)
@@ -39,11 +47,21 @@ class LabAgent:
             user_id=hash_user_id(user_id),
             session_id=session_id,
             tags=["lab", feature, self.model],
+            metadata={
+                "feature": feature,
+                "model": self.model,
+                "latency_ms": latency_ms,
+                "cost_usd": cost_usd,
+                "tokens_in": response.usage.input_tokens,
+                "tokens_out": response.usage.output_tokens,
+                "quality_score": quality_score,
+            },
         )
         langfuse_context.update_current_observation(
             metadata={"doc_count": len(docs), "query_preview": summarize_text(message)},
             usage_details={"input": response.usage.input_tokens, "output": response.usage.output_tokens},
         )
+        langfuse_context.score_current_trace(name="quality_score", value=quality_score)
 
         metrics.record_request(
             latency_ms=latency_ms,

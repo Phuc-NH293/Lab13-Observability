@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Day 13 Observability Dashboard</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --ink: #172026;
+      --muted: #5d6972;
+      --line: #d7dee5;
+      --blue: #2563eb;
+      --green: #138a5b;
+      --red: #c2413b;
+      --amber: #b7791f;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    header {
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+      padding: 18px 24px;
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 22px;
+      line-height: 1.2;
+    }
+
+    .meta {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(220px, 1fr));
+      gap: 16px;
+      padding: 20px 24px;
+    }
+
+    section {
+      min-height: 180px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 16px;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 15px;
+      line-height: 1.25;
+    }
+
+    .metric {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      border-top: 1px solid var(--line);
+      padding: 10px 0;
+    }
+
+    .metric:first-of-type {
+      border-top: 0;
+      padding-top: 0;
+    }
+
+    .label {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .value {
+      color: var(--blue);
+      font-size: 22px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .good {
+      color: var(--green);
+    }
+
+    .warn {
+      color: var(--amber);
+    }
+
+    .bad {
+      color: var(--red);
+    }
+
+    .bar {
+      height: 10px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #edf1f5;
+      margin-top: 12px;
+    }
+
+    .bar span {
+      display: block;
+      height: 100%;
+      width: 0%;
+      background: var(--green);
+      transition: width 180ms ease;
+    }
+
+    @media (max-width: 820px) {
+      main {
+        grid-template-columns: 1fr;
+        padding: 16px;
+      }
+
+      header {
+        padding: 16px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Day 13 Observability Dashboard</h1>
+    <div class="meta">Source: <code>GET /metrics</code> on this app. Auto-refresh: 30 seconds. Time range: latest in-memory window.</div>
+  </header>
+
+  <main>
+    <section>
+      <h2>Latency P50/P95/P99</h2>
+      <div class="metric"><span class="label">P50 target</span><span class="value" id="latency-p50">0 ms</span></div>
+      <div class="metric"><span class="label">P95 SLO &lt; 3000 ms</span><span class="value" id="latency-p95">0 ms</span></div>
+      <div class="metric"><span class="label">P99 watch</span><span class="value" id="latency-p99">0 ms</span></div>
+    </section>
+
+    <section>
+      <h2>Traffic</h2>
+      <div class="metric"><span class="label">Request count</span><span class="value" id="traffic">0</span></div>
+      <div class="metric"><span class="label">Refresh interval</span><span class="value">30 s</span></div>
+    </section>
+
+    <section>
+      <h2>Error Rate With Breakdown</h2>
+      <div class="metric"><span class="label">Error count</span><span class="value" id="errors">0</span></div>
+      <div class="metric"><span class="label">Top error type</span><span class="value" id="top-error">none</span></div>
+    </section>
+
+    <section>
+      <h2>Cost Over Time</h2>
+      <div class="metric"><span class="label">Average cost</span><span class="value" id="avg-cost">$0.0000</span></div>
+      <div class="metric"><span class="label">Total cost</span><span class="value" id="total-cost">$0.0000</span></div>
+    </section>
+
+    <section>
+      <h2>Tokens In/Out</h2>
+      <div class="metric"><span class="label">Input tokens</span><span class="value" id="tokens-in">0</span></div>
+      <div class="metric"><span class="label">Output tokens</span><span class="value" id="tokens-out">0</span></div>
+    </section>
+
+    <section>
+      <h2>Quality Proxy</h2>
+      <div class="metric"><span class="label">Average quality SLO >= 0.75</span><span class="value" id="quality">0.00</span></div>
+      <div class="bar"><span id="quality-bar"></span></div>
+    </section>
+  </main>
+
+  <script>
+    const endpoint = new URL("/metrics", window.location.origin).toString();
+
+    function setText(id, value) {
+      document.getElementById(id).textContent = value;
+    }
+
+    function formatMoney(value) {
+      return `$${Number(value || 0).toFixed(4)}`;
+    }
+
+    function classifyLatency(element, value) {
+      element.className = value <= 3000 ? "value good" : "value bad";
+    }
+
+    function classifyQuality(element, value) {
+      element.className = value >= 0.75 ? "value good" : "value warn";
+    }
+
+    async function refresh() {
+      try {
+        const response = await fetch(endpoint, { cache: "no-store" });
+        const metrics = await response.json();
+        const errors = metrics.error_breakdown || {};
+        const errorEntries = Object.entries(errors).sort((a, b) => b[1] - a[1]);
+        const errorCount = errorEntries.reduce((total, item) => total + item[1], 0);
+        const quality = Number(metrics.quality_avg || 0);
+
+        setText("latency-p50", `${metrics.latency_p50 || 0} ms`);
+        setText("latency-p95", `${metrics.latency_p95 || 0} ms`);
+        setText("latency-p99", `${metrics.latency_p99 || 0} ms`);
+        setText("traffic", metrics.traffic || 0);
+        setText("errors", errorCount);
+        setText("top-error", errorEntries[0] ? `${errorEntries[0][0]} (${errorEntries[0][1]})` : "none");
+        setText("avg-cost", formatMoney(metrics.avg_cost_usd));
+        setText("total-cost", formatMoney(metrics.total_cost_usd));
+        setText("tokens-in", metrics.tokens_in_total || 0);
+        setText("tokens-out", metrics.tokens_out_total || 0);
+        setText("quality", quality.toFixed(2));
+        document.getElementById("quality-bar").style.width = `${Math.min(100, quality * 100)}%`;
+        classifyLatency(document.getElementById("latency-p95"), Number(metrics.latency_p95 || 0));
+        classifyQuality(document.getElementById("quality"), quality);
+      } catch (error) {
+        setText("top-error", "metrics unavailable");
+      }
+    }
+
+    refresh();
+    setInterval(refresh, 30000);
+  </script>
+</body>
+</html>
